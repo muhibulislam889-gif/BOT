@@ -6,9 +6,9 @@
     "type": "offline"
   },
   "server": {
-    "ip": "example.aternos.me",
-    "port": 25565,
-    "version": "1.21.1"
+    "ip": "Freindworld-vmuy.aternos.me",
+    "port": 26597,
+    "version": "26.1.2"
   },
   "position": {
     "enabled": true,
