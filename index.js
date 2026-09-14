@@ -1,667 +1,900 @@
+const mineflayer = require('mineflayer');
+const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
+const { GoalBlock } = goals;
+const config = require('./settings.json');
+const express = require('express');
+const http = require('http');
 
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>{{ config('app.name', 'Pterodactyl') }}</title>
+// ============================================================
+// EXPRESS SERVER - Keep Render/Aternos alive
+// ============================================================
+const app = express();
+const PORT = process.env.PORT || 5000;
 
-        @section('meta')
-            <meta charset="utf-8">
-            <meta http-equiv="X-UA-Compatible" content="IE=edge">
-            <meta content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" name="viewport">
-            <meta name="csrf-token" content="{{ csrf_token() }}">
-            <meta name="robots" content="noindex">
-            <link rel="apple-touch-icon" sizes="180x180" href="/favicons/apple-touch-icon.png">
-            <link rel="icon" type="image/png" href="/favicons/favicon-32x32.png" sizes="32x32">
-            <link rel="icon" type="image/png" href="/favicons/favicon-16x16.png" sizes="16x16">
-            <link rel="manifest" href="/favicons/manifest.json">
-            <link rel="mask-icon" href="/favicons/safari-pinned-tab.svg" color="#bc6e3c">
-            <link rel="shortcut icon" href="/favicons/favicon.ico">
-            <meta name="msapplication-config" content="/favicons/browserconfig.xml">
-            <meta name="theme-color" content="#0e4688">
-        @show
+// Bot state tracking
+let botState = {
+  connected: false,
+  lastActivity: Date.now(),
+  reconnectAttempts: 0,
+  startTime: Date.now(),
+  errors: []
+};
 
-        @section('user-data')
-            @if(!is_null(Auth::user()))
-                <script>
-                    window.PterodactylUser = {!! json_encode(Auth::user()->toVueObject()) !!};
-                </script>
-            @endif
-            @if(!empty($siteConfiguration))
-                <script>
-                    window.SiteConfiguration = {!! json_encode($siteConfiguration) !!};
-                </script>
-            @endif
-        @show
-        <link rel="stylesheet" href="/custom_theme.css">
-        @yield('assets')
+// Health check endpoint for monitoring
+// Health check endpoint for monitoring
+app.get('/', (req, res) => {
+  // "Blue Teal Shadow" Theme - Live Dashboard
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>${config.name} Status</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #0f172a; 
+            color: #f8fafc; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+            overflow: hidden;
+          }
+          .container {
+            background: #1e293b;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(45, 212, 191, 0.2);
+            text-align: center;
+            width: 400px;
+            border: 1px solid #334155;
+            transition: box-shadow 0.3s ease;
+          }
+          h1 { margin-bottom: 30px; font-size: 24px; color: #ccfbf1; display: flex; align-items: center; justify-content: center; gap: 10px; }
+          .stat-card {
+            background: #0f172a;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 12px;
+            border-left: 5px solid #2dd4bf;
+            text-align: left;
+            box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+          }
+          .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+          .value { font-size: 18px; font-weight: bold; color: #2dd4bf; text-shadow: 0 0 10px rgba(45, 212, 191, 0.5); margin-top: 5px; }
+          .status-dot { 
+            height: 12px; width: 12px; 
+            border-radius: 50%; 
+            display: inline-block; 
+            margin-right: 8px;
+            box-shadow: 0 0 10px currentColor;
+            transition: color 0.3s ease, box-shadow 0.3s ease;
+            background-color: currentColor; /* Use CSS for the dot color */
+          }
+          /* Override specific IDs to set background color for the dot */
+          #live-indicator { background-color: currentColor; }
+          
+          .pulse { animation: pulse 2s infinite; }
+          @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.1); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+          .btn-guide {
+            display: inline-block; margin-top: 20px; padding: 12px 24px; 
+            background: #2dd4bf; color: #0f172a; text-decoration: none; 
+            border-radius: 8px; font-weight: bold; 
+            box-shadow: 0 0 15px rgba(45, 212, 191, 0.4);
+            transition: transform 0.2s;
+          }
+          .btn-guide:hover { transform: translateY(-2px); }
+          .connection-bar {
+            height: 4px; background: #334155; width: 100%; margin-top: 20px; border-radius: 2px; overflow: hidden;
+          }
+          .connection-fill {
+            height: 100%; width: 100%; background: #2dd4bf;
+            animation: loading 2s infinite linear;
+            transform-origin: 0% 50%;
+          }
+          @keyframes loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container" id="main-container">
+          <h1>
+            <span id="live-indicator" class="status-dot pulse" style="color: #ef4444;"></span> 
+            ${config.name}
+          </h1>
+          
+          <div class="stat-card">
+            <div class="label">Status</div>
+            <div class="value" id="status-text">Connecting...</div>
+          </div>
 
-        @include('layouts.scripts')
-    </head>
-    <body class="{{ $css['body'] ?? 'bg-neutral-50' }}">
-        @section('content')
-            @yield('above-container')
-            @yield('container')
-            @yield('below-container')
-        @show
-        @section('scripts')
-            {!! $asset->js('main.js') !!}
-        @show
-    </body>
-</html>
+          <div class="stat-card">
+            <div class="label">Uptime</div>
+            <div class="value" id="uptime-text">0h 0m 0s</div>
+          </div>
 
-<!DOCTYPE html>
-<html lang="en" data-theme="dracula">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DB Gaming Panel - Ultimate Edition</title>
+          <div class="stat-card">
+            <div class="label">Coordinates</div>
+            <div class="value" id="coords-text">Waiting...</div>
+          </div>
 
-<!-- Modern Gaming & Techno Fonts -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Plus+Jakarta+Sans:wght@400;600;800&family=JetBrains+Mono:wght@400;700&family=VT323&display=swap" rel="stylesheet">
+          <div class="stat-card">
+            <div class="label">Server</div>
+            <div class="value">${config.server.ip}</div>
+          </div>
 
-<style>
-/* ========================================================
-   1. DYNAMIC COLOR ENGINE & 20+ PREMIUM PRESETS
-   ======================================================== */
-:root {
-    --primary: #ff79c6;
-    --secondary: #bd93f9;
-    --accent: #50fa7b;
-    --bg-overlay: rgba(6, 9, 17, 0.85);
-    --glass-bg: rgba(18, 22, 36, 0.65);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --glow: rgba(255, 121, 198, 0.65);
-    --glow-subtle: rgba(255, 121, 198, 0.25);
-    --bg-image: url('https://images.wallpapersden.com/image/wl-cristiano-ronaldo-soccer-icon_92705.jpg');
-}
+          <a href="/tutorial" class="btn-guide">View Setup Guide</a>
+          
+          <div class="connection-bar">
+            <div class="connection-fill" id="activity-bar"></div>
+          </div>
+          
+          <p style="color: #64748b; font-size: 12px; margin-top: 15px;">
+            Live connection to Bot Process
+          </p>
+        </div>
 
-/* 20+ Premium Theme Presets */
-[data-theme="dracula"]          { --primary: #ff79c6; --secondary: #bd93f9; --accent: #50fa7b; --glow: rgba(255, 121, 198, 0.65); --glow-subtle: rgba(255, 121, 198, 0.25); }
-[data-theme="cyber-neon"]       { --primary: #00ff88; --secondary: #00f2fe; --accent: #7f00ff; --glow: rgba(0, 255, 136, 0.65); --glow-subtle: rgba(0, 255, 136, 0.25); }
-[data-theme="electric-cyan"]    { --primary: #00f2fe; --secondary: #3b82f6; --accent: #1d4ed8; --glow: rgba(0, 242, 254, 0.65); --glow-subtle: rgba(0, 242, 254, 0.25); }
-[data-theme="crimson-red"]      { --primary: #ff0055; --secondary: #ff5050; --accent: #990033; --glow: rgba(255, 0, 85, 0.65); --glow-subtle: rgba(255, 0, 85, 0.25); }
-[data-theme="emerald-mine"]     { --primary: #10b981; --secondary: #34d399; --accent: #047857; --glow: rgba(16, 185, 129, 0.65); --glow-subtle: rgba(16, 185, 129, 0.25); }
-[data-theme="amber-gold"]       { --primary: #f59e0b; --secondary: #fbbf24; --accent: #b45309; --glow: rgba(245, 158, 11, 0.65); --glow-subtle: rgba(245, 158, 11, 0.25); }
-[data-theme="deep-purple"]      { --primary: #a855f7; --secondary: #c084fc; --accent: #6366f1; --glow: rgba(168, 85, 247, 0.65); --glow-subtle: rgba(168, 85, 247, 0.25); }
-[data-theme="sunset-orange"]    { --primary: #ff5e36; --secondary: #ffa200; --accent: #ff0055; --glow: rgba(255, 94, 54, 0.65); --glow-subtle: rgba(255, 94, 54, 0.25); }
-[data-theme="tokyo-night"]      { --primary: #f7768e; --secondary: #7aa2f7; --accent: #bb9af7; --glow: rgba(247, 118, 142, 0.65); --glow-subtle: rgba(247, 118, 142, 0.25); }
-[data-theme="matrix-green"]     { --primary: #00ff41; --secondary: #008f11; --accent: #003b00; --glow: rgba(0, 255, 65, 0.65); --glow-subtle: rgba(0, 255, 65, 0.25); }
-[data-theme="ocean-blue"]       { --primary: #00b4d8; --secondary: #90e0ef; --accent: #0077b6; --glow: rgba(0, 180, 216, 0.65); --glow-subtle: rgba(0, 180, 216, 0.25); }
-[data-theme="synthwave-80s"]    { --primary: #ff007f; --secondary: #7928ca; --accent: #00f2fe; --glow: rgba(255, 0, 127, 0.65); --glow-subtle: rgba(255, 0, 127, 0.25); }
-[data-theme="cyberpunk-2077"]   { --primary: #fcee0a; --secondary: #00f0ff; --accent: #ff0055; --glow: rgba(252, 238, 10, 0.65); --glow-subtle: rgba(252, 238, 10, 0.25); }
-[data-theme="valorant-red"]     { --primary: #ff4655; --secondary: #0f1923; --accent: #ece8e1; --glow: rgba(255, 70, 85, 0.65); --glow-subtle: rgba(255, 70, 85, 0.25); }
-[data-theme="nordic-frost"]     { --primary: #88c0d0; --secondary: #81a1c1; --accent: #b48ead; --glow: rgba(136, 192, 208, 0.65); --glow-subtle: rgba(136, 192, 208, 0.25); }
-[data-theme="nether-flame"]     { --primary: #ff4500; --secondary: #ff8c00; --accent: #ffd700; --glow: rgba(255, 69, 0, 0.65); --glow-subtle: rgba(255, 69, 0, 0.25); }
-[data-theme="end-void"]         { --primary: #d8b4fe; --secondary: #a855f7; --accent: #10b981; --glow: rgba(216, 180, 254, 0.65); --glow-subtle: rgba(216, 180, 254, 0.25); }
-[data-theme="obsidian-dark"]    { --primary: #e2e8f0; --secondary: #64748b; --accent: #3b82f6; --glow: rgba(226, 232, 240, 0.55); --glow-subtle: rgba(226, 232, 240, 0.2); }
-[data-theme="sakura-pink"]      { --primary: #ffb7c5; --secondary: #ff69b4; --accent: #ffffff; --glow: rgba(255, 183, 197, 0.65); --glow-subtle: rgba(255, 183, 197, 0.25); }
-[data-theme="acid-slime"]       { --primary: #a3e635; --secondary: #4ade80; --accent: #0284c7; --glow: rgba(163, 230, 53, 0.65); --glow-subtle: rgba(163, 230, 53, 0.25); }
-[data-theme="royal-gold"]       { --primary: #ffd700; --secondary: #dfa100; --accent: #ffffff; --glow: rgba(255, 215, 0, 0.65); --glow-subtle: rgba(255, 215, 0, 0.25); }
-[data-theme="hyper-violet"]     { --primary: #d946ef; --secondary: #8b5cf6; --accent: #06b6d4; --glow: rgba(217, 70, 239, 0.65); --glow-subtle: rgba(217, 70, 239, 0.25); }
+        <script>
+          const formatUptime = (seconds) => {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            return \`\${h}h \${m}m \${s}s\`;
+          };
 
-/* ========================================================
-   2. GLOBAL BASE & ANIMATED GRADIENTS
-   ======================================================== */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-    transition: color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
-}
+          const updateStats = async () => {
+            try {
+              const res = await fetch('/health');
+              const data = await res.json();
+              
+              const statusText = document.getElementById('status-text');
+              const uptimeText = document.getElementById('uptime-text');
+              const coordsText = document.getElementById('coords-text');
+              const liveDot = document.getElementById('live-indicator');
+              const container = document.getElementById('main-container');
 
-body {
-    background: linear-gradient(var(--bg-overlay), var(--bg-overlay)), var(--bg-image) no-repeat center center fixed;
-    background-size: cover;
-    color: var(--text-main);
-    min-height: 100vh;
-    padding: 1.5rem 1rem;
-}
+              // Update Status
+              if (data.status === 'connected') {
+                statusText.innerHTML = '<span class="status-dot" style="color: #4ade80;"></span> Online & Running';
+                statusText.style.color = '#2dd4bf';
+                liveDot.style.color = '#4ade80'; // Green pulse
+                container.style.boxShadow = '0 0 50px rgba(45, 212, 191, 0.2)';
+              } else {
+                statusText.innerHTML = '<span class="status-dot" style="color: #f87171;"></span> Reconnecting...';
+                statusText.style.color = '#f87171';
+                liveDot.style.color = '#f87171'; // Red pulse
+                container.style.boxShadow = '0 0 50px rgba(248, 113, 113, 0.2)';
+              }
 
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
-::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 10px; box-shadow: 0 0 10px var(--glow); }
+              // Update Uptime
+              uptimeText.innerText = formatUptime(data.uptime);
 
-/* Animated Gradient Lines */
-@keyframes gradientShift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
+              // Update Coords
+              if (data.coords) {
+                coordsText.innerText = \`Coords: \${Math.floor(data.coords.x)}, \${Math.floor(data.coords.y)}, \${Math.floor(data.coords.z)}\`;
+              } else {
+                coordsText.innerText = 'Unknown Location';
+              }
 
-.animated-gradient-border::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--primary), var(--secondary), var(--accent), var(--primary));
-    background-size: 300% 300%;
-    animation: gradientShift 4s ease infinite;
-    box-shadow: 0 0 12px var(--glow);
-}
+            } catch (e) {
+              document.getElementById('status-text').innerText = 'System Offline';
+              document.getElementById('live-indicator').style.color = '#64748b'; // Grey
+            }
+          };
 
-/* Dynamic Pterodactyl UI Overrides */
-.nav-tab.active, nav a.active, .tab-item.active, [class*="Navigation"] a.active {
-    border-bottom: 2px solid var(--primary) !important;
-    color: var(--primary) !important;
-    text-shadow: 0 0 12px var(--glow) !important;
-}
+          // Poll every 1 second
+          setInterval(updateStats, 1000);
+          updateStats();
+        </script>
+      </body>
+    </html>
+  `);
+});
 
-.file-row:hover, table tbody tr:hover, [class*="FileObject"]:hover {
-    background: var(--glow-subtle) !important;
-    border-left: 2px solid var(--primary) !important;
-    box-shadow: inset 0 0 15px var(--glow-subtle) !important;
-}
+app.get('/tutorial', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>${config.name} - Setup Guide</title>
+        <style>
+          body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #cbd5e1; padding: 40px; max-width: 800px; margin: 0 auto; line-height: 1.6; }
+          h1, h2 { color: #2dd4bf; }
+          h1 { border-bottom: 2px solid #334155; padding-bottom: 10px; }
+          .card { background: #1e293b; padding: 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; }
+          a { color: #38bdf8; text-decoration: none; }
+          code { background: #334155; padding: 2px 6px; border-radius: 4px; color: #e2e8f0; font-family: monospace; }
+          .btn-home { display: inline-block; margin-bottom: 20px; padding: 8px 16px; background: #334155; color: white; border-radius: 6px; text-decoration: none; }
+        </style>
+      </head>
+      <body>
+        <a href="/" class="btn-home">Back to Dashboard</a>
+        <h1>Setup Guide (Under 15 Minutes)</h1>
+        
+        <div class="card">
+          <h2>Step 1: Configure Aternos</h2>
+          <ol>
+            <li>Go to <strong>Aternos</strong>.</li>
+            <li>Install <strong>Paper/Bukkit</strong> software.</li>
+            <li>Enable <strong>Cracked</strong> mode (Green Switch).</li>
+            <li>Install Plugins: <code>ViaVersion</code>, <code>ViaBackwards</code>, <code>ViaRewind</code>.</li>
+          </ol>
+        </div>
 
-/* ========================================================
-   FILE MANAGER NEON GLOW CUSTOMIZATION
-   ======================================================== */
-/* Folder & File Icons Glow */
-svg[class*="FolderIcon"], 
-svg[class*="FileIcon"], 
-svg.text-cyan-500, 
-[class*="FileObject"] svg, 
-[class*="FileManager"] svg {
-    fill: var(--primary) !important;
-    color: var(--primary) !important;
-    filter: drop-shadow(0 0 8px var(--glow)) drop-shadow(0 0 15px var(--glow)) !important;
-}
+        <div class="card">
+          <h2>Step 2: GitHub Setup</h2>
+          <ol>
+            <li>Download this code as ZIP and extract.</li>
+            <li>Edit <code>settings.json</code> with your IP/Port.</li>
+            <li>Upload all files to a new <strong>GitHub Repository</strong>.</li>
+          </ol>
+        </div>
 
-/* File & Folder Text Glow */
-[class*="FileObject"] a, 
-[class*="FileObject"] span, 
-[class*="FileManager"] a, 
-[class*="FileManager"] span, 
-.file-name, 
-td a {
-    color: var(--primary) !important;
-    text-shadow: 0 0 8px var(--glow), 0 0 16px var(--glow-subtle) !important;
-}
-
-input[type="checkbox"]:checked {
-    accent-color: var(--primary) !important;
-}
-
-/* ========================================================
-   CUSTOM START, RESTART, STOP BUTTON OVERRIDES
-   ======================================================== */
-button[data-btn="start"], button.ptero-btn-start {
-    background: linear-gradient(135deg, #2563eb, #3b82f6) !important;
-    color: #ffffff !important;
-    border: 1px solid #60a5fa !important;
-    box-shadow: 0 0 12px rgba(59, 130, 246, 0.5), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
-    border-radius: 8px !important;
-    font-weight: 800 !important;
-    text-transform: uppercase !important;
-    transition: all 0.25s ease-in-out !important;
-}
-
-button[data-btn="start"]:hover, button.ptero-btn-start:hover {
-    background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.9) !important;
-    transform: translateY(-2px) !important;
-}
-
-button[data-btn="restart"], button.ptero-btn-restart {
-    background: linear-gradient(135deg, #475569, #64748b) !important;
-    color: #ffffff !important;
-    border: 1px solid #94a3b8 !important;
-    box-shadow: 0 0 12px rgba(100, 116, 139, 0.5), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
-    border-radius: 8px !important;
-    font-weight: 800 !important;
-    text-transform: uppercase !important;
-    transition: all 0.25s ease-in-out !important;
-}
-
-button[data-btn="restart"]:hover, button.ptero-btn-restart:hover {
-    background: linear-gradient(135deg, #334155, #475569) !important;
-    box-shadow: 0 0 20px rgba(148, 163, 184, 0.9) !important;
-    transform: translateY(-2px) !important;
-}
-
-button[data-btn="stop"], button.ptero-btn-stop {
-    background: linear-gradient(135deg, #dc2626, #ef4444) !important;
-    color: #ffffff !important;
-    border: 1px solid #f87171 !important;
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.5), inset 0 0 8px rgba(255, 255, 255, 0.2) !important;
-    border-radius: 8px !important;
-    font-weight: 800 !important;
-    text-transform: uppercase !important;
-    transition: all 0.25s ease-in-out !important;
-}
-
-button[data-btn="stop"]:hover, button.ptero-btn-stop:hover {
-    background: linear-gradient(135deg, #b91c1c, #dc2626) !important;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.9) !important;
-    transform: translateY(-2px) !important;
-}
-
-/* ========================================================
-   3. MINECRAFT-STYLE 3D BUTTONS WITH NEON GLOW
-   ======================================================== */
-.mc-btn {
-    position: relative;
-    background: #3c3c3c;
-    border: 2px solid #000;
-    box-shadow: inset -2px -4px 0px 0px #1e1e1e, inset 2px 2px 0px 0px #606060, 0 0 8px var(--glow-subtle);
-    color: #fff;
-    font-family: 'VT323', monospace;
-    font-size: 1.1rem;
-    padding: 5px 14px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    letter-spacing: 1px;
-    user-select: none;
-    text-shadow: 2px 2px 0px #000;
-    border-radius: 2px;
-}
-
-.mc-btn:hover {
-    background: #4a4a4a;
-    border-color: var(--primary);
-    box-shadow: inset -2px -4px 0px 0px #2a2a2a, inset 2px 2px 0px 0px #808080, 0 0 18px var(--glow), inset 0 0 10px var(--glow-subtle);
-    color: var(--primary);
-    text-shadow: 0 0 8px var(--glow);
-}
-
-.mc-btn:active {
-    box-shadow: inset 2px 2px 0px 0px #1e1e1e, inset -2px -2px 0px 0px #606060, 0 0 12px var(--glow);
-    transform: translateY(2px);
-}
-
-/* ========================================================
-   4. DASHBOARD CARDS & LAYOUT WITH ENHANCED GLOW
-   ======================================================== */
-.dashboard-container {
-    max-width: 1180px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 1.2rem;
-}
-
-.glass-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--primary);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-radius: 16px;
-    padding: 1.2rem 1.4rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px var(--glow-subtle);
-    position: relative;
-    overflow: hidden;
-}
-
-.glass-card:hover {
-    border-color: var(--primary);
-    box-shadow: 0 12px 35px var(--glow-subtle), 0 0 25px var(--glow);
-}
-
-/* Top Navbar */
-.top-navbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.85rem 1.4rem;
-}
-
-.brand-title {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 1.2rem;
-    font-weight: 900;
-    letter-spacing: 1.5px;
-    color: #fff;
-    user-select: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-shadow: 0 0 15px var(--glow);
-}
-
-.brand-title span { 
-    color: var(--primary); 
-    text-shadow: 0 0 18px var(--glow);
-}
-
-.top-right-controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-#hiddenBgInput { display: none; }
-
-.status-badge {
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-family: 'Orbitron', sans-serif;
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--primary);
-    background: var(--glow-subtle);
-    color: var(--primary);
-    box-shadow: 0 0 16px var(--glow);
-    text-shadow: 0 0 8px var(--glow);
-}
-
-.status-dot {
-    width: 7px;
-    height: 7px;
-    background: currentColor;
-    border-radius: 50%;
-    box-shadow: 0 0 12px currentColor, 0 0 20px currentColor;
-    animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; filter: drop-shadow(0 0 8px currentColor); }
-    50% { opacity: 0.3; filter: drop-shadow(0 0 2px currentColor); }
-}
-
-/* Grid Layout */
-.grid-layout {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1.2rem;
-}
-
-.card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--text-muted);
-    letter-spacing: 0.5px;
-}
-
-.card-header span.icon { font-size: 1.05rem; }
-
-.card-value {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 1.75rem;
-    font-weight: 900;
-    margin: 0.4rem 0 0.2rem 0;
-    color: var(--primary);
-    text-shadow: 0 0 16px var(--glow);
-}
-
-.card-subtext {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
-.info-pills {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.pill {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--primary);
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: var(--text-main);
-    box-shadow: 0 0 8px var(--glow-subtle);
-}
-
-.console-header-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.6rem;
-}
-
-.console-box {
-    background: rgba(3, 5, 10, 0.85);
-    border: 1px solid var(--primary);
-    border-radius: 10px;
-    padding: 0.85rem 1rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
-    color: var(--primary);
-    height: 120px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    box-shadow: inset 0 0 15px rgba(0,0,0,0.8), 0 0 15px var(--glow-subtle);
-    text-shadow: 0 0 6px var(--glow-subtle);
-}
-
-/* Floating Select Box */
-.theme-select-box {
-    position: fixed;
-    bottom: 18px;
-    right: 18px;
-    z-index: 99;
-}
-
-.theme-dropdown {
-    background: #3c3c3c;
-    color: var(--primary);
-    border: 2px solid var(--primary);
-    box-shadow: inset -2px -4px 0px 0px #1e1e1e, inset 2px 2px 0px 0px #606060, 0 0 15px var(--glow);
-    padding: 6px 14px;
-    font-family: 'VT323', monospace;
-    font-size: 1.15rem;
-    cursor: pointer;
-    outline: none;
-    text-shadow: 1px 1px 0px #000, 0 0 8px var(--glow);
-    border-radius: 4px;
-}
-
-.theme-dropdown:hover {
-    border-color: var(--primary);
-    color: var(--primary);
-    box-shadow: 0 0 22px var(--glow), inset 0 0 8px var(--glow-subtle);
-}
-</style>
-</head>
-<body>
-
-<div class="dashboard-container">
-    <!-- Top Bar -->
-    <div class="glass-card animated-gradient-border top-navbar">
-        <div class="brand-title">
-            <span>⚡ DB GAMING</span> PANEL
+        <div class="card">
+          <h2>Step 3: Render (Free 24/7 Hosting)</h2>
+          <ol>
+            <li>Go to <a href="https://render.com" target="_blank">Render.com</a> and create a Web Service.</li>
+            <li>Connect your GitHub.</li>
+            <li>Build Command: <code>npm install</code></li>
+            <li>Start Command: <code>npm start</code></li>
+            <li><strong>Magic:</strong> The bot automatically pings itself to stay awake!</li>
+          </ol>
         </div>
         
-        <div class="top-right-controls">
-            <!-- UNTOUCHED CHANGE BG BUTTON STYLED AS MINECRAFT BUTTON -->
-            <input type="file" id="hiddenBgInput" accept="image/*" onchange="uploadCustomBackground(event)">
-            <button class="mc-btn" onclick="document.getElementById('hiddenBgInput').click()">
-                🖼️ Change BG
-            </button>
-            
-            <div class="status-badge" id="systemStatus">
-                <span class="status-dot"></span> <span id="statusText">SYSTEM ONLINE</span>
-            </div>
-        </div>
-    </div>
+        <p style="text-align: center; margin-top: 40px; color: #64748b;">AFK Bot Dashboard</p>
+      </body>
+    </html>
+  `);
+});
 
-    <!-- Stats Grid -->
-    <div class="grid-layout">
-        <!-- UNTOUCHED NETWORK PING CARD WITH REAL-TIME UPDATE -->
-        <div class="glass-card animated-gradient-border">
-            <div class="card-header"><span class="icon">📶</span> Network Ping</div>
-            <div class="card-value" id="pingValue">18 ms</div>
-            <div class="card-subtext">Node: Singapore (SG-01)</div>
-            <div class="info-pills">
-                <span class="pill">⚡ Low Latency</span>
-                <span class="pill">🛡️ Anti-DDoS</span>
-            </div>
-        </div>
+app.get('/health', (req, res) => {
+  res.json({
+    status: botState.connected ? 'connected' : 'disconnected',
+    uptime: Math.floor((Date.now() - botState.startTime) / 1000),
+    coords: (bot && bot.entity) ? bot.entity.position : null,
+    lastActivity: botState.lastActivity,
+    reconnectAttempts: botState.reconnectAttempts,
+    memoryUsage: process.memoryUsage().heapUsed / 1024 / 1024
+  });
+});
 
-        <!-- CARD 2: Shield Protection -->
-        <div class="glass-card animated-gradient-border">
-            <div class="card-header"><span class="icon">🛡️</span> Shield Protection</div>
-            <div class="card-value">Secured</div>
-            <div class="card-subtext">Automated Threat Mitigation</div>
-            <div class="info-pills">
-                <span class="pill">Firewall: Active</span>
-                <span class="pill">SSL v3</span>
-            </div>
-        </div>
+app.get('/ping', (req, res) => res.send('pong'));
 
-        <!-- CARD 3: Engine State WITH REAL-TIME UPDATE -->
-        <div class="glass-card animated-gradient-border">
-            <div class="card-header"><span class="icon">⚡</span> Engine State</div>
-            <div class="card-value" id="tpsValue">20.0 TPS</div>
-            <div class="card-subtext">Peak Performance Mode</div>
-            <div class="info-pills">
-                <span class="pill">PaperMC</span>
-                <span class="pill">JVM Opt</span>
-            </div>
-        </div>
-    </div>
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] HTTP server started on port ${PORT}`);
+});
 
-    <!-- Terminal Area -->
-    <div class="glass-card animated-gradient-border">
-        <div class="console-header-actions">
-            <div class="card-header"><span class="icon">📟</span> Live System Console</div>
-            <button class="mc-btn" onclick="clearConsole()">Clear Logs</button>
-        </div>
-        <div class="console-box" id="consoleLogs">
-            <div>[SYSTEM]: Dashboard loaded successfully.</div>
-        </div>
-    </div>
-</div>
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${h}h ${m}m ${s}s`;
+}
 
-<!-- Floating 20+ Theme Preset Selector -->
-<div class="theme-select-box">
-    <select class="theme-dropdown" id="themeSelector" onchange="changeTheme(this.value)">
-        <option value="dracula">🧛 Dracula</option>
-        <option value="cyber-neon">💚 Cyber Neon</option>
-        <option value="electric-cyan">🩵 Electric Cyan</option>
-        <option value="crimson-red">❤️ Crimson Red</option>
-        <option value="emerald-mine">❇️ Emerald Minecraft</option>
-        <option value="amber-gold">💛 Amber Gold</option>
-        <option value="deep-purple">💜 Deep Purple</option>
-        <option value="sunset-orange">🧡 Sunset Orange</option>
-        <option value="tokyo-night">🌃 Tokyo Night</option>
-        <option value="matrix-green">📟 Matrix Green</option>
-        <option value="ocean-blue">🌊 Ocean Blue</option>
-        <option value="synthwave-80s">🕶️ Synthwave 80s</option>
-        <option value="cyberpunk-2077">🤖 Cyberpunk 2077</option>
-        <option value="valorant-red">🎯 Valorant Red</option>
-        <option value="nordic-frost">❄️ Nordic Frost</option>
-        <option value="nether-flame">🔥 Nether Flame</option>
-        <option value="end-void">🌌 End Void</option>
-        <option value="obsidian-dark">🖤 Obsidian Dark</option>
-        <option value="sakura-pink">🌸 Sakura Pink</option>
-        <option value="acid-slime">🧪 Acid Slime</option>
-        <option value="royal-gold">👑 Royal Gold</option>
-        <option value="hyper-violet">⚡ Hyper Violet</option>
-    </select>
-</div>
+// ============================================================
+// SELF-PING - Prevent Render from sleeping
+// ============================================================
+const SELF_PING_INTERVAL = 10 * 60 * 1000; // 10 minutes
 
-<script>
-// --- Real-time updates without refresh ---
+const https = require('https');
+
+function startSelfPing() {
+  setInterval(() => {
+    const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    const protocol = url.startsWith('https') ? https : http;
+
+    protocol.get(`${url}/ping`, (res) => {
+      // console.log(`[KeepAlive] Self-ping: ${res.statusCode}`); // Optional: reduce spam
+    }).on('error', (err) => {
+      console.log(`[KeepAlive] Self-ping failed: ${err.message}`);
+    });
+  }, SELF_PING_INTERVAL);
+  console.log('[KeepAlive] Self-ping system started (every 10 min)');
+}
+
+startSelfPing();
+
+// ============================================================
+// MEMORY MONITORING
+// ============================================================
 setInterval(() => {
-    // Dynamic Ping updates (14ms - 24ms)
-    const randomPing = Math.floor(Math.random() * 11) + 14;
-    document.getElementById('pingValue').innerText = `${randomPing} ms`;
+  const mem = process.memoryUsage();
+  const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(2);
+  console.log(`[Memory] Heap: ${heapMB} MB`);
+}, 5 * 60 * 1000); // Every 5 minutes
 
-    // Dynamic TPS updates (19.8 - 20.0 TPS)
-    const randomTps = (19.8 + (Math.random() * 0.2)).toFixed(1);
-    document.getElementById('tpsValue').innerText = `${randomTps} TPS`;
+// ============================================================
+// BOT CREATION WITH RECONNECTION LOGIC
+// ============================================================
+let bot = null;
+let activeIntervals = [];
+let reconnectTimeout = null;
+let isReconnecting = false;
+
+function clearAllIntervals() {
+  console.log(`[Cleanup] Clearing ${activeIntervals.length} intervals`);
+  activeIntervals.forEach(id => clearInterval(id));
+  activeIntervals = [];
+}
+
+function addInterval(callback, delay) {
+  const id = setInterval(callback, delay);
+  activeIntervals.push(id);
+  return id;
+}
+
+function getReconnectDelay() {
+  // Aggressive reconnection: fast, flat delay or very subtle backoff
+  const baseDelay = config.utils['auto-reconnect-delay'] || 2000;
+  const maxDelay = config.utils['max-reconnect-delay'] || 15000;
+
+  // Use a much gentler backoff or just a flat delay if user wants "lower"
+  // Current logic: attempts * 1000 + base, capped at max
+  const delay = Math.min(baseDelay + (botState.reconnectAttempts * 1000), maxDelay);
+
+  return delay;
+}
+
+function createBot() {
+  if (isReconnecting) {
+    console.log('[Bot] Already reconnecting, skipping...');
+    return;
+  }
+
+  // Cleanup previous bot
+  if (bot) {
+    clearAllIntervals();
+    try {
+      bot.removeAllListeners();
+      bot.end();
+    } catch (e) {
+      console.log('[Cleanup] Error ending previous bot:', e.message);
+    }
+    bot = null;
+  }
+
+  console.log(`[Bot] Creating bot instance...`);
+  console.log(`[Bot] Connecting to ${config.server.ip}:${config.server.port}`);
+
+  try {
+    bot = mineflayer.createBot({
+      username: config['bot-account'].username,
+      password: config['bot-account'].password || undefined,
+      auth: config['bot-account'].type,
+      host: config.server.ip,
+      port: config.server.port,
+      version: config.server.version,
+      hideErrors: false,
+      checkTimeoutInterval: 120000 // 2 minutes - detects dead connections without false-positive disconnects
+    });
+
+    bot.loadPlugin(pathfinder);
+
+    // Connection timeout - if no spawn in 60s, reconnect
+    const connectionTimeout = setTimeout(() => {
+      if (!botState.connected) {
+        console.log('[Bot] Connection timeout - no spawn received');
+        scheduleReconnect();
+      }
+    }, 60000);
+
+    bot.once('spawn', () => {
+  clearTimeout(connectionTimeout);
+  botState.connected = true;
+  botState.lastActivity = Date.now();
+  botState.reconnectAttempts = 0;
+  isReconnecting = false;
+
+  console.log(`[Bot] [+] Successfully spawned on server!`);
+
+  // 🔐 FORCE LOGIN SYSTEM (Perzaan Edition)
+
+      bot.on('messagestr', (msg) => {
+  const message = msg.toLowerCase();
+
+  // Login
+  if (message.includes('login')) {
+    bot.chat('/login Perzuu');
+    console.log('[Auth] Login detected');
+  }
+
+  // Register
+  if (message.includes('register')) {
+    bot.chat('/register Perzuu Perzuu');
+    console.log('[Auth] Register detected');
+  }
+
+  // Creative mode success
+  if (
+    message.includes('commands.gamemode.success.self') ||
+    message.includes('set own game mode to creative mode')
+  ) {
+    console.log('[INFO] Bot is now in Creative Mode.');
+
+    bot.chat('/gamerule sendCommandFeedback false');
+  }
+});
+
+      if (config.discord && config.discord.events.connect) {
+  sendDiscordWebhook(`[+] **Connected** to \`${config.server.ip}\``, 0x4ade80);
+}
+
+const mcData = require('minecraft-data')(config.server.version);
+const defaultMove = new Movements(bot, mcData);
+
+initializeModules(bot, mcData, defaultMove);
+setupLeaveRejoin(bot, createBot);
+
+setTimeout(() => {
+  if (bot && botState.connected) {
+    bot.chat('/gamerule sendCommandFeedback false');
+  }
 }, 3000);
 
-// Dynamic Console Logs Simulation
-const sampleLogs = [
-    "[NETWORK]: Ping optimized to Singapore Node.",
-    "[SECURITY]: DDoS packet filter verified.",
-    "[JVM]: Garbage collection completed smoothly.",
-    "[SERVER]: World chunk data saved successfully."
-];
+setTimeout(() => {
+  if (bot && botState.connected) {
+    bot.chat('/gamemode creative');
+    console.log('[INFO] Attempted to set creative mode (requires OP)');
+  }
+}, 3000);
 
-setInterval(() => {
-    const randomLog = sampleLogs[Math.floor(Math.random() * sampleLogs.length)];
-    addLog(randomLog);
-}, 7000);
-
-function addLog(message) {
-    const consoleBox = document.getElementById('consoleLogs');
-    const time = new Date().toLocaleTimeString();
-    consoleBox.innerHTML += `<div>[${time}] ${message}</div>`;
-    consoleBox.scrollTop = consoleBox.scrollHeight;
-}
-
-function clearConsole() {
-    document.getElementById('consoleLogs').innerHTML = '<div>[SYSTEM]: Console cleared.</div>';
-}
-
-function uploadCustomBackground(event) {
-    const file = event.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const imgUrl = `url('${e.target.result}')`;
-            document.documentElement.style.setProperty('--bg-image', imgUrl);
-            localStorage.setItem('custom_bg_img', imgUrl);
-            addLog('[BG ENGINE]: Custom Background applied.');
-        };
-        reader.readAsDataURL(file);
-    }
-}
-
-/* Per-User Theme Persistence */
-function changeTheme(themeName) {
-    document.documentElement.setAttribute('data-theme', themeName);
-    localStorage.setItem('selected_theme', themeName);
-    addLog(`[THEME]: Switched to "${themeName}". Saved per-user.`);
-}
-
-/* Target Real React Pterodactyl Start/Restart/Stop Buttons */
-function updatePterodactylButtons() {
-    document.querySelectorAll('button').forEach(btn => {
-        const txt = btn.innerText.trim().toLowerCase();
-        if (txt === 'start' && !btn.classList.contains('ptero-btn-start')) {
-            btn.classList.add('ptero-btn-start');
-            btn.setAttribute('data-btn', 'start');
-        } else if (txt === 'restart' && !btn.classList.contains('ptero-btn-restart')) {
-            btn.classList.add('ptero-btn-restart');
-            btn.setAttribute('data-btn', 'restart');
-        } else if (txt === 'stop' && !btn.classList.contains('ptero-btn-stop')) {
-            btn.classList.add('ptero-btn-stop');
-            btn.setAttribute('data-btn', 'stop');
-        }
-    });
-}
-
-window.addEventListener('DOMContentLoaded', () => {
-    // Load per-user theme settings from LocalStorage
-    const savedTheme = localStorage.getItem('selected_theme') || 'dracula';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    document.getElementById('themeSelector').value = savedTheme;
-
-    // Load custom background settings
-    const savedBg = localStorage.getItem('custom_bg_img');
-    if (savedBg) {
-        document.documentElement.style.setProperty('--bg-image', savedBg);
-    }
-
-    // Continuously observe Pterodactyl's dynamic button loading
-    updatePterodactylButtons();
-    const observer = new MutationObserver(updatePterodactylButtons);
-    observer.observe(document.body, { childList: true, subtree: true });
 });
-</script>
 
-</body>
-</html>
+    // Handle disconnection
+    bot.on('end', (reason) => {
+      const wasSpawned = botState.connected;
+      console.log(`[Bot] Disconnected: ${reason || 'Unknown reason'}`);
+      botState.connected = false;
+      clearAllIntervals();
+
+      if (config.discord && config.discord.events.disconnect && reason !== 'Periodic Rejoin') {
+        sendDiscordWebhook(`[-] **Disconnected**: ${reason || 'Unknown'}`, 0xf87171); // Red
+      }
+
+      if (config.utils['auto-reconnect']) {
+        scheduleReconnect();
+      }
+    });
+
+    bot.on("kicked", (reason) => {
+    console.log(
+        "[KICK]",
+        typeof reason === "string"
+            ? reason
+            : JSON.stringify(reason, null, 2)
+    );
+});
+
+    bot.on('error', (err) => {
+      console.log(`[Bot] Error: ${err.message}`);
+      botState.errors.push({ type: 'error', message: err.message, time: Date.now() });
+      // Don't immediately reconnect on error - let 'end' event handle it
+    });
+
+  } catch (err) {
+    console.log(`[Bot] Failed to create bot: ${err.message}`);
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
+
+  if (isReconnecting) {
+    return;
+  }
+
+  isReconnecting = true;
+  botState.reconnectAttempts++;
+
+  const delay = getReconnectDelay();
+  console.log(`[Bot] Reconnecting in ${delay / 1000}s (attempt #${botState.reconnectAttempts})`);
+
+  reconnectTimeout = setTimeout(() => {
+    isReconnecting = false;
+    createBot();
+  }, delay);
+}
+
+// ============================================================
+// MODULE INITIALIZATION
+// ============================================================
+function initializeModules(bot, mcData, defaultMove) {
+  console.log('[Modules] Initializing all modules...');
+
+  // ---------- AUTO AUTH ----------
+  let authDone = false;
+
+bot.on('messagestr', (msg) => {
+  const message = msg.toLowerCase();
+
+  if (authDone) return;
+
+  if (message.includes('/register') || message.includes('register')) {
+    authDone = true;
+    bot.chat('/register Perzuu Perzuu');
+    console.log('[Auth] Register sent');
+    return;
+  }
+
+  if (message.includes('/login') || message.includes('login')) {
+    authDone = true;
+    bot.chat('/login Perzuu');
+    console.log('[Auth] Login sent');
+    return;
+  }
+});
+
+  // ---------- MOVE TO POSITION ----------
+  if (config.position.enabled) {
+    bot.pathfinder.setMovements(defaultMove);
+    bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
+  }
+
+  // ---------- ANTI-AFK (Simple) ----------
+  if (config.utils['anti-afk'].enabled) {
+    addInterval(() => {
+      if (bot && botState.connected) {
+        bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (bot) bot.setControlState('jump', false);
+        }, 100);
+        botState.lastActivity = Date.now();
+      }
+    }, 3000); // Jump every 30 seconds
+
+    if (config.utils['anti-afk'].sneak) {
+      bot.setControlState('sneak', true);
+    }
+  }
+
+  // ---------- MOVEMENT MODULES ----------
+  if (config.movement['circle-walk'].enabled) {
+    startCircleWalk(bot, defaultMove);
+  }
+  if (config.movement['random-jump'].enabled) {
+    startRandomJump(bot);
+  }
+  if (config.movement['look-around'].enabled) {
+    startLookAround(bot);
+  }
+
+  // ---------- CUSTOM MODULES ----------
+  if (config.modules.avoidMobs) avoidMobs(bot);
+  if (config.modules.combat) combatModule(bot, mcData);
+  if (config.modules.beds) bedModule(bot, mcData);
+  if (config.modules.chat) chatModule(bot);
+
+  // Periodic Rejoin
+  if (config.utils['periodic-rejoin'] && config.utils['periodic-rejoin'].enabled) {
+    periodicRejoin(bot);
+  }
+
+  console.log('[Modules] All modules initialized!');
+}
+
+// Periodic Rejoin Module
+const setupLeaveRejoin = require('./leaveRejoin');
+
+// Periodic Rejoin Module - Handled by leaveRejoin.js now
+function periodicRejoin(bot) {
+  // Deprecated in favor of leaveRejoin.js
+  console.log('[Rejoin] Using new leaveRejoin system.');
+}
+
+// ============================================================
+// MOVEMENT HELPERS
+// ============================================================
+function startCircleWalk(bot, defaultMove) {
+  const radius = config.movement['circle-walk'].radius;
+  let angle = 0;
+  let lastPathTime = 0;
+
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+
+    // Rate limit pathfinding
+    const now = Date.now();
+    if (now - lastPathTime < 2000) return;
+    lastPathTime = now;
+
+    try {
+      const x = bot.entity.position.x + Math.cos(angle) * radius;
+      const z = bot.entity.position.z + Math.sin(angle) * radius;
+      bot.pathfinder.setMovements(defaultMove);
+      bot.pathfinder.setGoal(new GoalBlock(Math.floor(x), Math.floor(bot.entity.position.y), Math.floor(z)));
+      angle += Math.PI / 4;
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[CircleWalk] Error:', e.message);
+    }
+  }, config.movement['circle-walk'].speed);
+}
+
+function startRandomJump(bot) {
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    try {
+      bot.setControlState('jump', true);
+      setTimeout(() => {
+        if (bot) bot.setControlState('jump', false);
+      }, 300);
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[RandomJump] Error:', e.message);
+    }
+  }, config.movement['random-jump'].interval);
+}
+
+function startLookAround(bot) {
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    try {
+      const yaw = Math.random() * Math.PI * 2;
+      const pitch = (Math.random() - 0.5) * Math.PI / 4;
+      bot.look(yaw, pitch, true);
+      botState.lastActivity = Date.now();
+    } catch (e) {
+      console.log('[LookAround] Error:', e.message);
+    }
+  }, config.movement['look-around'].interval);
+}
+
+// ============================================================
+// CUSTOM MODULES
+// ============================================================
+
+// Avoid mobs/players
+function avoidMobs(bot) {
+  const safeDistance = 5;
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    try {
+      const entities = Object.values(bot.entities).filter(e =>
+        e.type === 'mob' || (e.type === 'player' && e.username !== bot.username)
+      );
+      for (const e of entities) {
+        if (!e.position) continue;
+        const distance = bot.entity.position.distanceTo(e.position);
+        if (distance < safeDistance) {
+          bot.setControlState('back', true);
+          setTimeout(() => {
+            if (bot) bot.setControlState('back', false);
+          }, 500);
+          break;
+        }
+      }
+    } catch (e) {
+      console.log('[AvoidMobs] Error:', e.message);
+    }
+  }, 2000);
+}
+
+// Combat module
+function combatModule(bot, mcData) {
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    try {
+      if (config.combat['attack-mobs']) {
+        const mobs = Object.values(bot.entities).filter(e =>
+          e.type === 'mob' && e.position &&
+          bot.entity.position.distanceTo(e.position) < 4
+        );
+        if (mobs.length > 0) {
+          bot.attack(mobs[0]);
+        }
+      }
+    } catch (e) {
+      console.log('[Combat] Error:', e.message);
+    }
+  }, 1500);
+
+  bot.on('health', () => {
+    if (!config.combat['auto-eat']) return;
+    try {
+      if (bot.food < 14) {
+        const food = bot.inventory.items().find(i => {
+          const itemData = mcData.itemsByName[i.name];
+          return itemData && itemData.food;
+        });
+        if (food) {
+          bot.equip(food, 'hand')
+            .then(() => bot.consume())
+            .catch(e => console.log('[AutoEat] Error:', e.message));
+        }
+      }
+    } catch (e) {
+      console.log('[AutoEat] Error:', e.message);
+    }
+  });
+}
+
+// Bed module (FIXED - beds are blocks, not entities)
+function bedModule(bot, mcData) {
+  addInterval(async () => {
+    if (!bot || !botState.connected) return;
+
+    try {
+      const isNight = bot.time.timeOfDay >= 12500 && bot.time.timeOfDay <= 23500;
+
+      if (config.beds['place-night'] && isNight && !bot.isSleeping) {
+        // Find nearby bed blocks
+        const bedBlock = bot.findBlock({
+          matching: block => block.name.includes('bed'),
+          maxDistance: 8
+        });
+
+        if (bedBlock) {
+          try {
+            await bot.sleep(bedBlock);
+            console.log('[Bed] Sleeping...');
+          } catch (e) {
+            // Can't sleep - maybe not night enough or monsters nearby
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[Bed] Error:', e.message);
+    }
+  }, 10000);
+}
+
+// Chat module
+function chatModule(bot) {
+  bot.on('chat', (username, message) => {
+    if (!bot || username === bot.username) return;
+
+    try {
+      if (config.chat.respond) {
+        const lowerMsg = message.toLowerCase();
+        if (lowerMsg.includes('hello') || lowerMsg.includes('hi')) {
+          bot.chat(`Hello, ${username}!`);
+        }
+        if (message.startsWith('!tp ') && config.chat.respond) {
+          const target = message.split(' ')[1];
+          if (target) bot.chat(`/tp ${target}`);
+        }
+      }
+    } catch (e) {
+      console.log('[Chat] Error:', e.message);
+    }
+  });
+}
+
+// ============================================================
+// CONSOLE COMMANDS
+// ============================================================
+const readline = require('readline');
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: false
+});
+
+rl.on('line', (line) => {
+  if (!bot || !botState.connected) {
+    console.log('[Console] Bot not connected');
+    return;
+  }
+
+  const trimmed = line.trim();
+  if (trimmed.startsWith('say ')) {
+    bot.chat(trimmed.slice(4));
+  } else if (trimmed.startsWith('cmd ')) {
+    bot.chat('/' + trimmed.slice(4));
+  } else if (trimmed === 'status') {
+    console.log(`Connected: ${botState.connected}, Uptime: ${formatUptime(Math.floor((Date.now() - botState.startTime) / 1000))}`);
+  } else if (trimmed === 'reconnect') {
+    console.log('[Console] Manual reconnect requested');
+    bot.end();
+  } else {
+    bot.chat(trimmed);
+  }
+});
+
+// ============================================================
+// DISCORD WEBHOOK INTEGRATION
+// ============================================================
+function sendDiscordWebhook(content, color = 0x0099ff) {
+  if (!config.discord || !config.discord.enabled || !config.discord.webhookUrl || config.discord.webhookUrl.includes('YOUR_DISCORD')) return;
+
+  const protocol = config.discord.webhookUrl.startsWith('https') ? https : http;
+  const urlParts = new URL(config.discord.webhookUrl);
+
+  const payload = JSON.stringify({
+    username: config.name,
+    embeds: [{
+      description: content,
+      color: color,
+      timestamp: new Date().toISOString(),
+      footer: { text: 'Slobos AFK Bot' }
+    }]
+  });
+
+  const options = {
+    hostname: urlParts.hostname,
+    port: 443,
+    path: urlParts.pathname + urlParts.search,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': payload.length
+    }
+  };
+
+  const req = protocol.request(options, (res) => {
+    // console.log(`[Discord] Sent webhook: ${res.statusCode}`);
+  });
+
+  req.on('error', (e) => {
+    console.log(`[Discord] Error sending webhook: ${e.message}`);
+  });
+
+  req.write(payload);
+  req.end();
+}
+
+// ============================================================
+// CRASH RECOVERY - IMMORTAL MODE
+// ============================================================
+process.on('uncaughtException', (err) => {
+  console.log(`[FATAL] Uncaught Exception: ${err.message}`);
+  // console.log(err.stack); // Optional: keep logs cleaner
+  botState.errors.push({ type: 'uncaught', message: err.message, time: Date.now() });
+
+  // CRITICAL: DO NOT EXIT.
+  // The user wants the server to stay up "all the time no matter what".
+  // We just clear intervals and try to restart the bot logic.
+  if (config.utils['auto-reconnect']) {
+    clearAllIntervals();
+    // Wrap in a tiny timeout to prevent tight loops if the error is synchronous
+    setTimeout(() => {
+      scheduleReconnect();
+    }, 1000);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.log(`[FATAL] Unhandled Rejection: ${reason}`);
+  botState.errors.push({ type: 'rejection', message: String(reason), time: Date.now() });
+  // Do not exit.
+});
+
+// Graceful shutdown from external signals (still allowed to exit if system demands it)
+process.on('SIGTERM', () => {
+  console.log('[System] SIGTERM received. Ignoring to stay alive? (Render might force kill)');
+  // If we mistakenly exit here, the web server dies. 
+  // User asked for "all the time on no matter what".
+  // Note: Render will SIGKILL if we don't exit, but this keeps us up as long as possible.
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  // Local Ctrl+C
+  console.log('[System] Manual stop requested. Exiting...');
+  process.exit(0);
+});
+
+// ============================================================
+// START THE BOT
+// ============================================================
+console.log('='.repeat(50));
+console.log('  Minecraft AFK Bot v2.3 - Bug Fix Edition');
+console.log('='.repeat(50));
+console.log(`Server: ${config.server.ip}:${config.server.port}`);
+console.log(`Version: ${config.server.version}`);
+console.log(`Auto-Reconnect: ${config.utils['auto-reconnect'] ? 'Enabled' : 'Disabled'}`);
+console.log('='.repeat(50));
+
+createBot();
